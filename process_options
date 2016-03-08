@@ -1,0 +1,744 @@
+#!/usr/bin/python
+
+#$ -S /usr/bin/python
+#$ -cwd
+#$ -o std/std_$JOB_ID.out
+#$ -e std/std_$JOB_ID.err
+
+import sys
+import os
+import string
+import argparse
+import math
+import time
+import itertools as it
+import json
+
+def main():
+    global verbose
+
+    b_file_str = args.bf
+    e_file_str = args.ef
+    t_file_str = args.tf
+
+    b_list = []
+    e_list = []
+    t_list = []
+
+    key_list = []
+    values_list = []
+
+    n_points = args.np
+    non_additive = args.na
+    verbose = args.verb
+    command_name = args.command
+    print_only = args.disp
+    do_icc = args.icc 
+    cf = args.conv**(n_points - 1) # conversion factor, default is to convert from simulation units to cm^3/mol
+    if (non_additive and n_points < 3):
+        print "Invalid options for non_additive and n_points. Please make sure you specify correct options!!!"
+        sys.exit(1)
+
+    flagF = args.f
+    flagU = args.u
+    flagN = args.n
+
+    jar_full_path_str = args.jf
+    sim_file_str = "/usr/users/rsubrama/workspace/Etomica-apps/src/etomica/virial/simulations/{}.java".format(args.sf)
+    tmp_str = jar_full_path_str.split("/")
+    jar_file_str = tmp_str[len(tmp_str) - 1]
+    jar_file_str = jar_file_str.split(".")[0]
+    piFlag = False
+    
+    plots = args.plots
+
+    prefix_str = jar_file_str
+    if (b_file_str is not None):
+        prefix_str += b_file_str.split(".")[0]
+    if (e_file_str is not None):
+        prefix_str += e_file_str.split(".")[0]
+    if (t_file_str is not None):
+        prefix_str += t_file_str.split(".")[0]
+    piFlag = False
+
+    # make sure the jar file exists
+    try:
+        jar_file = open(jar_full_path_str,'r')
+    except IOError:
+        print "Input jar file {} doesn't exist!!! Please make sure you specify the correct file name".format(jar_full_path_str)
+        sys.exit(1)
+    else:
+        if (verbose):
+            tmp_str = "{} opened successfully. \nStarted reading data..\n".format(jar_full_path_str)
+            print tmp_str
+
+    # make sure the java simulation file exists
+    try:
+        sim_file = open(sim_file_str,'r')
+    except IOError:
+        print "Input java simulation file {} doesn't exist!!! Please make sure you specify the correct file name".format(sim_file_str)
+        sys.exit(1)
+    else:
+        if (verbose):
+            tmp_str = "{} opened successfully. \nStarted reading data..\n".format(sim_file_str)
+            print tmp_str
+        # change file name
+        sim_file_str = "etomica.virial.simulations.{}".format(args.sf)
+
+    if ("PI" in args.sf):
+        piFlag = True
+    if ("VirialH2PI" in args.sf):
+        element = "H2"
+    if ("VirialO2" in args.sf):
+        element = "O2"
+    if ("VirialN2" in args.sf):
+        element = "N2"
+
+    if (b_file_str):
+        # make sure the bit file exists
+        try:
+            b_file = open(b_file_str,'r')
+        except IOError:
+            print "Input bit file {} doesn't exist!!! Please make sure you specify the correct file name".format(b_file_str)
+            sys.exit(1)
+        else:
+            if (verbose):
+                tmp_str = "{} opened successfully. \nStarted reading data..\n".format(b_file_str)
+                print tmp_str
+
+        # read list of bit from b_file
+        for line in b_file:
+            for word in line.split():
+                b_list.append(word)
+
+        # close b_file
+        b_file.close()
+        if (verbose):
+            tmp_str = "{} closed successfully. \nFinished reading data..\n".format(b_file_str)
+            print tmp_str
+    else:
+        b_list = args.bl
+        if (verbose):
+            tmp_str ="Successfully read list of bits from command line\n"
+            print tmp_str
+
+    key_list.append(" ")
+    values_list.append(b_list)
+    if (e_file_str):
+        # make sure the exponent file exists
+        try:
+            e_file = open(e_file_str,'r')
+        except IOError:
+            print "Input exponent file {} doesn't exist!!! Please make sure you specify the correct file name".format(e_file_str)
+            sys.exit(1)
+        else:
+            if (verbose):
+                tmp_str = "{} opened successfully. \nStarted reading data..\n".format(e_file_str)
+                print tmp_str
+
+        # read list of exponents from e_file
+        for line in e_file:
+            for word in line.split():
+                for word in line.split():
+                    e_list.append(int(word))
+
+        # close e_file
+        e_file.close()
+        if (verbose):
+            tmp_str = "{} closed successfully. \nFinished reading data..\n".format(e_file_str)
+            print tmp_str
+    else:
+        e_list = args.el
+        if (verbose):
+            tmp_str ="Successfully read list of exponents from command line\n"
+            print tmp_str
+    
+    key_list.append("-numSteps")
+    values_list.append(e_list)
+    if (t_file_str):
+        # make sure the temperature file exists
+        try:
+            t_file = open(t_file_str,'r')
+        except IOError:
+            print "Input temperature file {} doesn't exist!!! Please make sure you specify the correct file name".format(t_file_str)
+            sys.exit(1)
+        else:
+            if (verbose):
+                tmp_str = "{} opened successfully. \nStarted reading data..\n".format(t_file_str)
+                print tmp_str
+
+        # read list of temperatures from t_file
+        for line in t_file:
+            for word in line.split():
+                t_list.append(float(word))
+
+        # close t_file
+        t_file.close()
+        if (verbose):
+            tmp_str = "{} closed successfully. \nFinished reading data..\n".format(t_file_str)
+            print tmp_str
+    else:
+        t_list = args.tl
+        if (verbose):
+            tmp_str ="Successfully read list of temperatures from command line\n"
+            print tmp_str
+
+    ######################################
+    # make sure to store integers as whole numbers rather than floats.
+    # useful when changing directories using os.chdir()
+    ######################################
+    for i in xrange(len(t_list)):
+        if (t_list[i].is_integer()):
+            t_list[i] = int(t_list[i])
+        if (not os.path.isdir(str(t_list[i]))):
+            print "{} temperature directory doesn't exist!!! Please make sure you specify the correct directory name".format(str(t_list[i]))
+            sys.exit(1)
+
+    key_list.append("-temperatureK")
+    values_list.append(t_list)
+
+    n_general_vars = len(key_list) # b,e,t
+    ######################################
+    # specific options that are optional
+    ######################################
+    p_list = args.pl
+    if (p_list is not None):
+        key_list.append("-nBeads")
+        values_list.append(p_list)
+        if (verbose):
+            tmp_str ="Successfully read list of p from command line\n"
+            print tmp_str
+    elif (piFlag):
+        tmp_str = "Options mismatch, specify list of p or use different simulation file"
+        print tmp_str
+        sys.exit(1)
+
+    m_list = args.ml
+    if (m_list is not None):
+        key_list.append("-s")
+        values_list.append(m_list)
+        if (verbose):
+            tmp_str ="Successfully read list of multiplicities from command line\n"
+            print tmp_str
+    elif (element == "O2"):
+        print "You need to specify list of multiplicities when using O2 simulation class\n"
+        sys.exit(1)
+        
+    pot_list = args.potl
+    if (pot_list is not None):
+        key_list.append("-isPT2")
+        tmp_list = []
+        for i in pot_list:
+            if (i == "PT2"):
+                tmp_list.append("true")
+            else:
+                tmp_list.append("false")
+        values_list.append(tmp_list)
+        if (verbose):
+            tmp_str ="Successfully read list of potential options from command line\n"
+            print tmp_str
+    elif (element == "O2"):
+        print "You need to specify list of potentials when using O2 simulation class\n"
+        sys.exit(1)
+
+    n_total_vars = len(key_list)
+    options_list = list(it.product(*values_list))
+    total_count = len(options_list)
+   
+    ######################################
+    # order of variables in options_list is
+    # b(bit) e(exponent) t(temperature) [p(nBeads)] [m(multiplicity)] [potl(potential)]
+    ######################################
+    if (verbose):
+        print "Number of total options: {}".format(total_count)
+        print options_list
+    n_times = args.nt
+    t_start = 0
+    t_end = 0
+    t_previous_sim = 0
+    cmd_str = "set -e"
+    ret_value = os.system(cmd_str)
+    if (ret_value != 0):
+        print "Oops"
+        sys.exit(1)
+
+    jar_str = "java -cp {}:/usr/share/java/Jama.jar:/usr/share/java/json_simple.jar {} -jarFile {} ".format(jar_full_path_str,sim_file_str,jar_file_str)
+    res_files = []
+    count = []
+    finished_count = 0
+    unfinished_count = 0
+    not_started_count = 0
+    res_count = 0
+    err_count = 0
+    res_count_new = 0
+    err_count_new = 0
+    ######################################
+    # start processing
+    ######################################
+    for sim_option in options_list:
+        if (verbose):
+            print sim_option
+        b_in_str = ""
+        b = sim_option[0]
+        if (b == 'avgBL'):
+            b_in_str = "-or FANCY -bl FANCY "
+        if (b == 'B2PfG'):
+            b_in_str = "-potentialLevel patkowski -subtractWhat none -blOption fixedGround " 
+        if (b == 'B2HPfTA'):
+            b_in_str = "-potentialLevel hindePatkowski -subtractWhat none -blOption fixedTempAvg " 
+        if (b == 'B2HPvBL'):
+            b_in_str = "-potentialLevel hindePatkowski -subtractWhat none -blOption variable " 
+        if (b == 'CL' and not piFlag):
+            b_in_str = "-potentialLevel classical "
+        if (b == 'SC' and not piFlag):
+            b_in_str = "-potentialLevel semiClassical " 
+        if (b == 'PISC'):
+            b_in_str = "-scBeads " 
+        b_in_str += "-nPoints {} ".format(n_points)
+        b_out_str = "B{0}{1}".format(n_points,b)
+        if (non_additive):
+            b_in_str += "-nonAdditive true "
+        if (n_points > 2):
+            if (non_additive):
+                b_out_str += "N"
+            b_out_str += "A"
+
+        e = sim_option[1]
+        e_in_str = "-numSteps {} ".format(10**e)
+        e_out_str = "{}s".format(e)
+
+        t = sim_option[2]
+        t_in_str = "-temperatureK {} ".format(t)
+        t_out_str = "{}K".format(t)
+        
+        ######################################
+        os.chdir(str(t))
+        ######################################
+        if (element == "H2"):
+            f1_str = "P2HydrogenHinde_allCoefs.dat"
+            if (not os.path.isfile(f1_str)):
+                cmd_str = "ln -s ../{}".format(f1_str)
+                ret_value = os.system(cmd_str)
+                if (ret_value != 0):
+                    print "Oops"
+                    sys.exit(1)
+
+            f2_str = "P2HydrogenHinde_shortRange.dat"
+            if (not os.path.isfile(f2_str)):
+                cmd_str = "ln -s ../{}".format(f2_str)
+                ret_value = os.system(cmd_str)
+                if (ret_value != 0):
+                    print "Oops"
+                    sys.exit(1)
+
+            f3_str = "P2HydrogenHinde_longRange.dat"
+            if (not os.path.isfile(f3_str)):
+                cmd_str = "ln -s ../{}".format(f3_str)
+                ret_value = os.system(cmd_str)
+                if (ret_value != 0):
+                    print "Oops"
+                    sys.exit(1)
+        specific_options_in_str = ""
+        specific_options_out_str = ""
+        m = None
+        p = None
+        potl = None
+        for i in xrange(n_general_vars,n_total_vars):
+            specific_options_in_str += "{} {} ".format(key_list[i],sim_option[i])
+            if (key_list[i] == "-nBeads"):
+                p = sim_option[i]
+                specific_options_out_str += "{}nb".format(p)
+            if (key_list[i] == "-s"):
+                m = sim_option[i]
+                specific_options_out_str += "{}m".format(m)
+            if (key_list[i] == "-isPT2"):
+                potl = sim_option[i]
+                if (sim_option[i] == "true"):
+                    specific_options_out_str += "PT2pot"
+                else:
+                    specific_options_out_str += "MRCIpot"
+        specific_options_in_str = specific_options_in_str.rstrip()
+        main_cmd_str = jar_str + b_in_str + e_in_str + t_in_str + specific_options_in_str        
+        if (verbose and command_name == 'job_script'):
+            print specific_options_in_str
+            print main_cmd_str
+        if (command_name == "job_script"):
+            for i in xrange(n_times):
+                i_str = "sim{}".format(i)
+                if (n_times > 1):
+                    sim_out_str = jar_file_str + b_out_str + e_out_str + t_out_str + specific_options_out_str + i_str + ".json"
+                else:
+                    sim_out_str = jar_file_str + b_out_str + e_out_str + t_out_str + specific_options_out_str + ".json"
+
+                if (verbose):
+                    print sim_out_str
+
+                cmd_str = "set +e"
+                ret_value = os.system(cmd_str)
+                if (ret_value != 0):
+                    print "Oops"
+                    sys.exit(1)
+
+                cmd_str = "../makelock {}".format(sim_out_str)
+                ret_value = os.system(cmd_str)
+                if (ret_value != 0):
+                    cmd_str = "set -e"
+                    ret_value = os.system(cmd_str)
+                    if (ret_value != 0):
+                        print "Oops"
+                        sys.exit(1)
+                    continue
+
+                cmd_str = "set -e"
+                ret_value = os.system(cmd_str)
+                if (ret_value != 0):
+                    print "Oops"
+                    sys.exit(1)
+
+                t_previous_sim = t_end - t_start
+                if (print_only):
+                    print main_cmd_str
+                    os.remove(sim_out_str)
+                else:
+                    if (t_previous_sim >= 36000):
+                        if (verbose):
+                            tmp_str = "Taking too long to run jobs, I'm quitting\n"
+                            print tmp_str
+                        sys.exit(2)
+                    else:
+                        t_start = time.clock()
+
+                        ret_value = os.system(main_cmd_str)
+                        if (ret_value != 0):
+                            print "Oops"
+                            sys.exit(1)
+                        
+                        t_end = time.clock()
+        
+        elif (command_name == "check_status"):
+            sim_out_str = jar_file_str + b_out_str + e_out_str + t_out_str + specific_options_out_str + ".json"
+            if (verbose):
+                print sim_out_str
+            if (os.path.isfile(sim_out_str)):
+                try:
+                    sim_out_file = open(sim_out_str,'r')
+                except IOError:
+                    print "Error opening file {}!!!".format(sim_out_str)
+                    sys.exit(1)
+                else:
+                    if (verbose):
+                        tmp_str = "Successfully opened file {}\n".format(sim_out_str)
+                        print tmp_str
+                    try:
+                        dict1 = json.load(sim_out_file)
+                    except ValueError:
+                        tmp_str = "{} is empty! Continuing to process next entry\n".format(sim_out_str)
+                        if (verbose):
+                            print tmp_str
+                        dict1 = {}
+                    sim_out_file.close()
+                    if ("time" in dict1.keys()):
+                        finished_count += 1
+                        if (flagF):
+                            tmp_str = "Finished:" + "\t" + b_out_str + "\t" + e_out_str + "\t" + t_out_str + "\t" + specific_options_out_str + "\n"
+                            print tmp_str
+                    else:
+                        unfinished_count += 1
+                        if (flagU):
+                            tmp_str = "Unfinished:" + "\t" + b_out_str + "\t" + e_out_str + "\t" + t_out_str + "\t" + specific_options_out_str + "\n"
+                            print tmp_str
+            else:
+                not_started_count += 1
+                if (flagN):
+                    tmp_str = "Not started:" + "\t" +  b_out_str + "\t" + e_out_str + "\t" + t_out_str + "\t" + specific_options_out_str + "\n"
+                    print tmp_str
+            
+
+        else:
+            # process_output: only to be used after all simulations are known to be finished.
+            res_str = "../"+prefix_str + b_out_str + e_out_str + specific_options_out_str + "Results.dat"
+            err_str = "../"+prefix_str + b_out_str + e_out_str + specific_options_out_str + "Error.dat"
+            res_flag = False
+            err_flag = False
+            bn = 0
+            bnError = 0
+            if (entry_exists(t,res_str)):
+                res_count += 1
+                if (verbose):
+                    tmp_str = "Entry {} exists in results, proceeding to next entry\n".format(sim_option)
+                    print tmp_str
+            elif (entry_exists(t,err_str)):
+                err_count += 1
+                if (verbose):
+                    tmp_str = "Entry {} exists in error file, proceeding to next entry\n".format(sim_option)
+                    print tmp_str
+            else:
+                for i in xrange(n_times):
+                    i_str = "sim{}".format(i)
+                    if (n_times > 1):
+                        sim_out_str = jar_file_str + b_out_str + e_out_str + t_out_str + specific_options_out_str + i_str + ".json"
+                    else:
+                        sim_out_str = jar_file_str + b_out_str + e_out_str + t_out_str + specific_options_out_str + ".json"
+
+                    if (verbose):
+                        print sim_out_str
+
+                    if (os.path.isfile(sim_out_str)):
+                        try:
+                            sim_out_file = open(sim_out_str,'r')
+                        except IOError:
+                            print "Error opening file {}!!!".format(sim_out_str)
+                            sys.exit(1)
+                        if (verbose):
+                            tmp_str = "Successfully opened file {}\n".format(sim_out_str)
+                            print tmp_str
+                        try:
+                            dict1 = json.load(sim_out_file)
+                        except ValueError:
+                            tmp_str = "{} is empty! Continuing to process next entry\n".format(sim_out_str)
+                            if (verbose):
+                                print tmp_str
+                            continue
+                        sim_out_file.close()
+                        if (check_data(dict1)):
+                            res_flag = True
+                            if (verbose):
+                                tmp_str = "Sanity and quality checks passed\n"
+                                print tmp_str
+                            
+                            bn += cf*dict1['bn']
+                            bnError += (cf*dict1['bnError'])**2
+                            
+                        else:
+                            if (verbose):
+                                tmp_str = "Sanity and quality checks failed\n"
+                                print tmp_str
+                            err_flag = True
+                            break
+                            
+                if (res_flag):
+                    res_count += 1
+                    res_count_new += 1
+                    bn /= float(n_times)
+                    bnError = bnError**0.5
+                    bnError /= float(n_times)                
+                    # average time calculation
+                    if (verbose):
+                        print res_str
+                        print res_files
+                    if (res_str not in res_files):
+                        if (verbose):
+                            print "{}\n".format(res_str)
+                        res_files.append(res_str)
+                        count.append(1)
+                    else:
+                        index = res_files.index(res_str)
+                        count[index] += 1
+
+                    # writing to file
+                    try:
+                        res_file = open(res_str,'a')
+                    except IOError:
+                        print "Error writing to file {}\n".format(res_str)
+                    if (verbose):
+                        print "Results file {} sucessfully opened for writing\n".format(res_str)
+                    tmp_str = "{0:4.2f} {1:20.15f} {2:20.15f}\n".format(t,bn,bnError)
+                    res_file.write(tmp_str)
+                    res_file.close()
+                
+                if (err_flag):
+                    err_count += 1
+                    err_count_new += 1
+                    # writing to file
+                    try:
+                        err_file = open(err_str,'a')
+                    except IOError:
+                        print "Error writing to file {}\n".format(err_str)
+                    if (verbose):
+                        print "Results file {} sucessfully opened for writing\n".format(err_str)
+                    tmp_str = "{0:4.2f} {1:20.15f} {2:20.15f}\n".format(t,bn,bnError)                   
+                    err_file.write(tmp_str)
+                    err_file.close()
+
+        ######################################
+        os.chdir("..")
+        ######################################
+    
+    
+    if (command_name == "check_status"):
+        print
+        print "Finished count: \t {}".format(finished_count)
+        print "Unfinished count: \t {}".format(unfinished_count)
+        print "Not started count: \t {}".format(not_started_count)
+        print
+
+    if (command_name == "process_output"):
+        if (total_count != (res_count + err_count)):
+            print "Oops, total_count is {} while res_count + err_count is {}\n".format(total_count,(res_count+err_count))
+            sys.exit(1)
+        print "Summary of processed outputs\n"
+        print "Total: \t {}".format(total_count)
+        print "Results: \t {}".format(res_count)
+        print "Error: \t {}\n".format(err_count)        
+        l_res_files = len(res_files)
+        print
+        print "Results entries new: \t {}".format(res_count_new)
+        print "Error entries new: \t {}\n".format(err_count_new)
+        for i in xrange(l_res_files):
+            print "File name: \t {}\n".format(res_files[i][3:])
+            print "No. of entries processed:\t {}\n".format(count[i])
+        
+        print "Order of virial coefficient: \t {}".format(n_points)
+        print "Units: \t cm^{} mol^(-{})".format(3*(n_points - 1),(n_points - 1))
+    return 0
+
+#################################################################################################
+def entry_exists(t1,str1):
+    """
+    Process the current simulation output
+    """
+    if (verbose):
+        print t1
+    try:
+        f1 = open(str1,'r')
+    except IOError:
+        if (verbose):
+            print "File {} doesn't exist\n".format(str1)
+        return False
+    if (verbose):
+        print "File {} exists, continuing to read lines\n".format(str1)
+        
+    for line in f1.readlines():
+        if (verbose):
+            print line
+        words = line.split(" ")
+        if (verbose):
+            print words
+        if (t1 == float(words[0])):
+            if (verbose):
+                print "Entry exists for T = {} in {}\n".format(t1,str1)
+            f1.close()
+            return True
+    f1.close()
+    return False
+#################################################################################################
+
+def check_data(dict1):
+    """
+    Performs a check on the dictionary dict1 for any irregularities
+
+    """
+    abort = False
+
+    if (verbose):
+        print dict1.keys()
+
+    # check if 'value' is ok
+    if ('bn' in dict1.keys() and (math.isinf(dict1['bn']) or math.isnan(dict1['bn']) or dict1['bn'] == 0.0)):
+        abort = True
+        if (verbose):
+            tmp_str = "bn is {}\n".format(dict1['bn'])
+            print tmp_str
+
+    # check if 'error' is ok
+    if ('bnError' in dict1.keys() and (math.isinf(dict1['bnError']) or math.isnan(dict1['bnError']) or dict1['bnError'] == 0.0)):
+        abort = True
+        if (verbose):
+            tmp_str = "bnError is {}\n".format(dict1['bnError'])
+            print tmp_str
+
+    # check if 'corr' is ok
+    if ('tarCorr' in dict1.keys() and (math.isinf(dict1['tarCorr']) or math.isnan(dict1['tarCorr']) or dict1['tarCorr'] > 0.5)):
+        abort = True
+        if (verbose):
+            tmp_str = "tarCorr is {}\n".format(dict1['tarCorr'])
+            print tmp_str
+
+    # check if 'or_acc' is ok
+    if ('tarOrAcc' in dict1.keys() and (math.isinf(dict1['tarOrAcc']) or math.isnan(dict1['tarOrAcc']) or dict1['tarOrAcc'] < 0.001)):
+        abort = True
+        if (verbose):
+            tmp_str = "tarOrAcc is {}\n".format(dict1['tarOrAcc'])
+            print tmp_str
+
+    # check if 'bl_acc' is ok
+    if ('tarBlAcc' in dict1.keys() and (math.isinf(dict1['tarBlAcc']) or math.isnan(dict1['tarBlAcc']) or dict1['tarBlAcc'] < 0.001)):
+        abort = True
+        if (verbose):
+            tmp_str = "tarBlAcc is {}\n".format(dict1['tarBlAcc'])
+            print tmp_str
+
+    # check if 'time' is ok
+    if (math.isinf(dict1['time']) or math.isnan(dict1['time']) or dict1['time'] == 0.0):
+        abort = True
+        if (verbose):
+            tmp_str = "time is {}\n".format(dict1['time'])
+            print tmp_str
+
+    # check if 'unit' is ok
+    if (not dict1['unit']):
+        abort = True
+        if (verbose):
+            tmp_str = "unit is {0}\n".format(dict1['unit'])
+            print tmp_str
+
+    if (abort):
+        return False
+    else:
+        return True
+##################################################################################################
+
+class MyParser(argparse.ArgumentParser):
+    def error(self, message):
+        sys.stderr.write('error: {}\n'.format(message))
+        self.print_help()
+        sys.exit(2)
+
+if __name__ =="__main__":
+    parser = MyParser(description='This is a job script for a given list of temperatures,p,bits and exponents')
+    parser.add_argument('command',choices=['check_status','job_script','process_output'],help='Different commands to perform on the given set of options')
+    parser.add_argument('jf', help='Jar file to be used as input for script.')
+    parser.add_argument('sf', help='Java simulation file to be used as input for script. Not the full path, just the name will do!')
+    parser.add_argument('-v', dest='verb', action='store_true', default=False, help='Gives a verbose output with more than needed information. To be used mainly for debugging')
+    parser.add_argument('-np', dest='np', default=2, type=int, help='Order of virial coefficient associated with the commands')
+    parser.add_argument('-na', dest='na', action='store_true', default=False, help='Used for higher order coefficients if non-additive potential is available')
+
+    # general options that are NOT optional
+    t_group = parser.add_mutually_exclusive_group(required=True)
+    t_group.add_argument('-tf', dest='tf',help='File containing list of temperatures to be used as input for script.')
+    t_group.add_argument('-tl', dest='tl',nargs='+',type=float,help='List of temperatures to be used as input for script.')
+    b_group = parser.add_mutually_exclusive_group(required=True)
+    b_group.add_argument('-bf', dest='bf',help='File containing list of bits to be used as input for script.')
+    b_group.add_argument('-bl', dest='bl',nargs='+',help='List of bits to be used as input for script.')
+    e_group = parser.add_mutually_exclusive_group(required=True)
+    e_group.add_argument('-ef', dest='ef',help='File containing list of exponents to be used as input for script.')
+    e_group.add_argument('-el', dest='el',nargs='+',type=int,help='List of exponents to be used as input for script.')
+
+    # specific options that are optional
+    parser.add_argument('-pl', dest='pl',nargs='+',type=int,help='List of p to be used as input for script.')
+    parser.add_argument('-ml', dest='ml',nargs='+',type=int,help='List of multiplicities to be used as input for script.')
+    parser.add_argument('-pot_l', dest='potl',nargs='+',type=str,help='List of potential options to be used as input for script.')
+    
+    # optional arguments specific to command choices
+    # job_script
+    parser.add_argument('-p', dest='disp', action='store_true', default=False, help='Instead of submitting the job, just prints out the command as a string')
+
+    # check_status
+    parser.add_argument('-f', dest='f', action='store_true', default=False, help='Flag to print output only for all finished simulations')
+    parser.add_argument('-u', dest='u', action='store_true', default=False, help='Flag to print output only for all unfinished simulations')
+    parser.add_argument('-n', dest='n', action='store_true', default=False, help='Flag to print output only for all not started simulations')
+
+    # process_output
+    parser.add_argument('-plots', dest='plots', action='store_true', default=False, help='Creates plots as described in the script')
+    parser.add_argument('-conv', dest='conv',default=0.6022141289999999,type=float, help='Conversion factor for B2, default is to convert from simulation units to cm^3/mol.')
+    parser.add_argument('-icc', dest='icc', action='store_true', default=False, help='Flag to make plots to check for internal consistency')
+    parser.add_argument('-nt', dest='nt',default=1,type=int,help='To run the job more than once')
+    
+    if len(sys.argv) < 1:
+        parser.print_help()
+        sys.exit(1)
+    args = parser.parse_args()
+    main()
+else:
+    sys.exit("Sorry, must run as driver...")
+
