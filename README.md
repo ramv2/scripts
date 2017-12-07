@@ -1,4 +1,3 @@
-This is a new sentence.
 # process_options:
 A script to read in different command line options, process them and perform one of three different operations on them:
   1. Create jobs that can then be submitted in a cluster.
